@@ -1,16 +1,20 @@
 package com.aws.sample.cmr;
 
 import javax.jms.*;
+import javax.jms.Queue;
+
 import org.apache.activemq.ActiveMQSslConnectionFactory;
 import org.apache.commons.lang.RandomStringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Random;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 import java.util.concurrent.*;
 
 public class JmsPublisher implements Callable<Void> {
@@ -22,7 +26,7 @@ public class JmsPublisher implements Callable<Void> {
     static final String brokerUser = System.getenv("BROKER_USER");
     static final String brokerPassword = System.getenv("BROKER_PASSWORD");
     private static final String[] MESSAGES = new String[MESSAGES_PER_QUEUE];
-    private static final int MESSAGE_SIZE = 1024 * 1;
+    private static final int MESSAGE_SIZE = 1024 * 256;
 
     static {
         for (int i = 0; i < MESSAGES_PER_QUEUE; i++) {
@@ -36,9 +40,11 @@ public class JmsPublisher implements Callable<Void> {
     final Session session;
     Queue queue;
     MessageProducer producer;
+    long expiresAt;
 
-    public JmsPublisher(int offset) throws JMSException {
+    public JmsPublisher(int offset, long expiresAt) throws JMSException {
         this.offset = offset;
+        this.expiresAt = expiresAt;
         connFact = new ActiveMQSslConnectionFactory(brokerUrl);
         connFact.setConnectResponseTimeout(10000);
         conn = connFact.createConnection (brokerUser, brokerPassword);
@@ -59,7 +65,7 @@ public class JmsPublisher implements Callable<Void> {
                             session.createTextMessage(MESSAGES[messageCountPerQueue]),
                             DeliveryMode.PERSISTENT,
                             4,
-                            -1);
+                            (expiresAt - LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)) * 1000);
 //                    LOG.info(String.format("sent message '%s' to queue: 'queue.number%s'", messageCountPerQueue, queueCount));
                 }
 
@@ -76,10 +82,11 @@ public class JmsPublisher implements Callable<Void> {
     }
 
     public static void main(String[] args) throws JMSException, ExecutionException, InterruptedException {
+        long expiresAt = LocalDateTime.now().plus(Duration.ofMinutes(30)).toEpochSecond(ZoneOffset.UTC);
         Collection<JmsPublisher> publishers = new ArrayList<>();
 
         for (int publisherCount = 0; publisherCount < 40; publisherCount++) {
-            publishers.add(new JmsPublisher(publisherCount));
+            publishers.add(new JmsPublisher(publisherCount, expiresAt));
         }
 
         ExecutorService executor = Executors.newFixedThreadPool(40);
